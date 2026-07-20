@@ -7,6 +7,8 @@
  *   /unread — 文章阅读场景:    低调标题 (小号 uppercase meta 色) + 本页该分类文章数
  *
  * 排序: 按计数降序; 分类内保持原条目顺序
+ *       /unread 额外: 默认新→旧 (desc)，page-header 加箭头按钮切 asc/desc，状态存 localStorage
+ *       (键名 miniflux:unread:sort-dir)。客户端排序，跨页不一致视为已知边界(多数情况翻不到页)。
  * 折叠: 点击标题切换，状态存 localStorage (key 前缀区分两页)
  * 保留: 移动 article 节点 (非克隆)，保留所有 form/button/swipe 事件与 data-id
  */
@@ -19,6 +21,68 @@
   const cfg = isFeeds
     ? { selector: 'article.feed-item', groupClass: 'category-group', titleClass: 'category-group-title', countClass: 'cat-unread', storagePrefix: 'miniflux:feeds:collapsed:', countFromCounter: true }
     : { selector: 'article.entry-item', groupClass: 'entries-group', titleClass: 'entries-group-title', countClass: 'entries-group-count', storagePrefix: 'miniflux:unread:collapsed:', countFromCounter: false };
+
+  // ===== /unread 排序 (客户端) =====
+  const SORT_KEY = 'miniflux:unread:sort-dir';
+  const currentDir = () => {
+    try { return localStorage.getItem(SORT_KEY) || 'desc'; } catch (e) { return 'desc'; }
+  };
+  const setDir = (d) => {
+    try { localStorage.setItem(SORT_KEY, d); } catch (e) {}
+  };
+  const entryTime = (art) => {
+    const t = art.querySelector('time[datetime]');
+    if (!t) return 0;
+    const ts = Date.parse(t.getAttribute('datetime') || '');
+    return Number.isNaN(ts) ? 0 : ts;
+  };
+  // stable sort：时间相同维持原顺序；desc=新→旧(大→小)，asc=旧→新(小→大)
+  const sortArticles = (arr, dir) => {
+    const sign = dir === 'asc' ? 1 : -1;
+    return arr
+      .map((el, i) => [el, i])
+      .sort((a, b) => {
+        const d = (entryTime(a[0]) - entryTime(b[0])) * sign;
+        return d !== 0 ? d : a[1] - b[1];
+      })
+      .map(([el]) => el);
+  };
+  // 切换时对已有分组 body 重新排序：append 移动已有节点，事件/data-id 全保留
+  const applySortToGroups = (dir) => {
+    const bodies = document.querySelectorAll('.items .' + cfg.groupClass + '-body');
+    for (const body of bodies) {
+      const ordered = sortArticles(Array.from(body.children), dir);
+      for (const el of ordered) body.appendChild(el);
+    }
+  };
+  const insertSortToggle = () => {
+    const nav = document.querySelector('.page-header nav ul');
+    if (!nav) return;
+    if (nav.querySelector('[data-sort-toggle="1"]')) return;
+
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.className = 'page-button';
+    btn.setAttribute('type', 'button');
+    btn.setAttribute('data-sort-toggle', '1');
+
+    const sync = () => {
+      const d = currentDir();
+      btn.textContent = d === 'asc' ? '↑' : '↓';
+      const label = d === 'asc' ? '排序：旧→新' : '排序：新→旧';
+      btn.setAttribute('title', label);
+      btn.setAttribute('aria-label', label);
+    };
+    btn.addEventListener('click', () => {
+      const next = currentDir() === 'asc' ? 'desc' : 'asc';
+      setDir(next);
+      applySortToGroups(next);
+      sync();
+    });
+    sync();
+    li.appendChild(btn);
+    nav.appendChild(li);
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init, { once: true });
@@ -93,7 +157,8 @@
 
       const body = document.createElement('div');
       body.className = cfg.groupClass + '-body';
-      for (const art of g.articles) body.appendChild(art);
+      const bodyArts = isUnread ? sortArticles(g.articles, currentDir()) : g.articles;
+      for (const art of bodyArts) body.appendChild(art);
       section.appendChild(body);
 
       const key = cfg.storagePrefix + g.catId;
@@ -121,5 +186,7 @@
 
       items.appendChild(section);
     }
+
+    if (isUnread) insertSortToggle();
   }
 })();

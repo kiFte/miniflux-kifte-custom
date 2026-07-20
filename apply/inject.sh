@@ -14,21 +14,26 @@
 #   ./inject.sh <command> [file]
 #
 # Commands:
-#   css <file>       Inject stylesheet (file path, or "-" for stdin)
-#   js  <file>       Inject custom_js   (file path, or "-" for stdin)
-#   reset-css        Clear stylesheet
-#   reset-js         Clear custom_js
+#   css <file>                   Inject stylesheet (file path, or "-" for stdin)
+#   js  <file>                   Inject custom_js   (file path, or "-" for stdin)
+#   reset-css                    Clear stylesheet
+#   reset-js                     Clear custom_js
+#   entry-direction <asc|desc>   Set server-side entry sort direction
+#                                (entry_sorting_direction). One-off; use once
+#                                with "desc" so /unread pagination also defaults
+#                                to newest-first, matching the client-side toggle.
 #
 # Examples:
 #   ./inject.sh css combined/latte+grouping.css
 #   ./inject.sh js js/group_list.js
+#   ./inject.sh entry-direction desc
 #   cat my.css | ./inject.sh css -
 #   ./inject.sh reset-js
 #
 # Exit codes: 0 success, 1 usage/IO error, 2 missing env, 3 API non-2xx.
 set -uo pipefail
 
-usage() { sed -n '2,28p' "$0"; exit 1; }
+usage() { sed -n '2,/^# Exit codes:/p' "$0"; exit 1; }
 
 [ $# -ge 1 ] || usage
 cmd="$1"
@@ -78,5 +83,14 @@ case "$cmd" in
     ;;
   reset-css) put_body '{"stylesheet": ""}' ;;
   reset-js)  put_body '{"custom_js": ""}'  ;;
+  entry-direction)
+    [ $# -ge 2 ] || { echo "entry-direction: missing asc|desc argument"; usage; }
+    case "$2" in
+      asc|desc) ;;
+      *) echo "entry-direction: invalid value '$2' (expected asc or desc)"; exit 1 ;;
+    esac
+    body=$(python3 -c "import json; print(json.dumps({'entry_sorting_direction': '$2'}))")
+    put_body "$body"
+    ;;
   *) echo "unknown command: $cmd"; usage ;;
 esac
